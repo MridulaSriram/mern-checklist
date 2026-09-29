@@ -2,99 +2,114 @@ import { useEffect, useState } from "react";
 import Signup from "./Signup";
 import Login from "./Login";
 
-const API_URL = "http://localhost:5000/api/tasks";
+const API_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 function App() {
-  const [authScreen, setAuthScreen] = useState("signup");
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    const savedUser = localStorage.getItem("user");
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
+
+  const [token, setToken] = useState(() => {
+    return localStorage.getItem("token");
+  });
+
+  const [showSignup, setShowSignup] = useState(false);
 
   const [tasks, setTasks] = useState([]);
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
   const [priority, setPriority] = useState("medium");
   const [dueDate, setDueDate] = useState("");
   const [attachment, setAttachment] = useState("");
-  const [loading, setLoading] = useState(false);
+
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
-    const savedToken = localStorage.getItem("token");
-
-    if (savedUser && savedToken) {
-      setUser(JSON.parse(savedUser));
+    if (token) {
+      loadTasks();
     }
-  }, []);
+  }, [token]);
 
-  useEffect(() => {
-    if (!user) {
-      return;
-    }
+  const loadTasks = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/tasks`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
-    const loadTasks = async () => {
-      setLoading(true);
+      const data = await response.json();
 
-      try {
-        const token = localStorage.getItem("token");
-
-        const response = await fetch(API_URL, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error("Failed to load tasks");
-        }
-
-        const data = await response.json();
-        setTasks(data);
-      } catch (error) {
-        console.error("Failed to load tasks:", error);
-      } finally {
-        setLoading(false);
+      if (!response.ok) {
+        setMessage(data.message || "Failed to load tasks");
+        return;
       }
-    };
 
-    loadTasks();
-  }, [user]);
+      setTasks(data);
+    } catch (error) {
+      console.error(error);
+      setMessage("Could not connect to the server.");
+    }
+  };
 
-  const addTask = async (event) => {
+  const handleSignup = () => {
+    setShowSignup(false);
+    setMessage("Account created. Please log in.");
+  };
+
+  const handleLogin = (loggedInUser) => {
+    setUser(loggedInUser);
+    setToken(localStorage.getItem("token"));
+    setMessage("");
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+
+    setToken(null);
+    setUser(null);
+    setTasks([]);
+  };
+
+  const handleAddTask = async (event) => {
     event.preventDefault();
+    setMessage("");
 
-    if (!title.trim() || !dueDate) {
-      alert("Please enter a task name and completion date.");
+    if (!title || !dueDate) {
+      setMessage("Task name and due date are required.");
       return;
     }
-
-    const newTask = {
-      title: title.trim(),
-      description: description.trim(),
-      category: category.trim(),
-      priority,
-      dueDate,
-      attachment: attachment.trim(),
-    };
 
     try {
-      const token = localStorage.getItem("token");
-
-      const response = await fetch(API_URL, {
+      const response = await fetch(`${API_URL}/api/tasks`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(newTask),
+        body: JSON.stringify({
+          title,
+          description,
+          category,
+          priority,
+          dueDate,
+          attachment,
+        }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error("Failed to create task");
+        setMessage(data.message || "Failed to create task");
+        return;
       }
 
-      const savedTask = await response.json();
-
-      setTasks((currentTasks) => [savedTask, ...currentTasks]);
+      setTasks((previousTasks) => [data, ...previousTasks]);
 
       setTitle("");
       setDescription("");
@@ -102,17 +117,17 @@ function App() {
       setPriority("medium");
       setDueDate("");
       setAttachment("");
+
+      setMessage("Task added successfully.");
     } catch (error) {
       console.error(error);
-      alert("Could not save the task.");
+      setMessage("Could not connect to the server.");
     }
   };
 
-  const completeTask = async (id) => {
+  const handleComplete = async (task) => {
     try {
-      const token = localStorage.getItem("token");
-
-      const response = await fetch(`${API_URL}/${id}`, {
+      const response = await fetch(`${API_URL}/api/tasks/${task._id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -124,44 +139,46 @@ function App() {
         }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error("Failed to complete task");
+        setMessage(data.message || "Failed to complete task");
+        return;
       }
 
-      const updatedTask = await response.json();
-
-      setTasks((currentTasks) =>
-        currentTasks.map((task) =>
-          task._id === id ? updatedTask : task
+      setTasks((previousTasks) =>
+        previousTasks.map((item) =>
+          item._id === task._id ? data : item
         )
       );
     } catch (error) {
       console.error(error);
-      alert("Could not complete the task.");
+      setMessage("Could not connect to the server.");
     }
   };
 
-  const deleteTask = async (id) => {
+  const handleDelete = async (taskId) => {
     try {
-      const token = localStorage.getItem("token");
-
-      const response = await fetch(`${API_URL}/${id}`, {
+      const response = await fetch(`${API_URL}/api/tasks/${taskId}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error("Failed to delete task");
+        setMessage(data.message || "Failed to delete task");
+        return;
       }
 
-      setTasks((currentTasks) =>
-        currentTasks.filter((task) => task._id !== id)
+      setTasks((previousTasks) =>
+        previousTasks.filter((task) => task._id !== taskId)
       );
     } catch (error) {
       console.error(error);
-      alert("Could not delete the task.");
+      setMessage("Could not connect to the server.");
     }
   };
 
@@ -191,232 +208,210 @@ function App() {
     (task) => task.status === "completed"
   );
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+  const formatDate = (date) => {
+    if (!date) {
+      return "-";
+    }
 
-    setUser(null);
-    setTasks([]);
-    setAuthScreen("login");
+    return new Date(date).toLocaleDateString();
   };
 
-  const TaskCard = ({ task, showComplete }) => (
-    <div className="task-card">
-      <h3>{task.title}</h3>
-
-      {task.description && <p>{task.description}</p>}
-
-      <p>
-        <strong>Category:</strong>{" "}
-        {task.category || "Not specified"}
-      </p>
-
-      <p>
-        <strong>Priority:</strong> {task.priority}
-      </p>
-
-      <p>
-        <strong>Created:</strong>{" "}
-        {task.createdDate
-          ? new Date(task.createdDate).toLocaleDateString()
-          : "Not available"}
-      </p>
-
-      <p>
-        <strong>Due:</strong>{" "}
-        {new Date(task.dueDate).toLocaleDateString()}
-      </p>
-
-      {task.completedDate && (
-        <p>
-          <strong>Completed:</strong>{" "}
-          {new Date(task.completedDate).toLocaleDateString()}
-        </p>
-      )}
-
-      {task.attachment && (
-        <p>
-          <strong>Attachment:</strong> {task.attachment}
-        </p>
-      )}
-
-      <div className="task-actions">
-        {showComplete && (
-          <button onClick={() => completeTask(task._id)}>
-            Complete
-          </button>
-        )}
-
-        <button
-          className="delete-button"
-          onClick={() => deleteTask(task._id)}
-        >
-          Delete
-        </button>
-      </div>
-    </div>
-  );
-
-  if (!user) {
+  const renderTask = (task, showCompleteButton = false) => {
     return (
-      <div>
-        {authScreen === "signup" ? (
-          <>
-            <Signup
-              onSignup={() => {
-                setAuthScreen("login");
-              }}
-            />
+      <div className="task-card" key={task._id}>
+        <h3>{task.title}</h3>
 
-            <div style={{ textAlign: "center", marginTop: "15px" }}>
-              <p>Already have an account?</p>
-
-              <button onClick={() => setAuthScreen("login")}>
-                Go to Login
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <Login
-              onLogin={(loggedInUser) => {
-                setUser(loggedInUser);
-              }}
-            />
-
-            <div style={{ textAlign: "center", marginTop: "15px" }}>
-              <p>Don't have an account?</p>
-
-              <button onClick={() => setAuthScreen("signup")}>
-                Create Account
-              </button>
-            </div>
-          </>
+        {task.description && (
+          <p>
+            <strong>Description:</strong> {task.description}
+          </p>
         )}
+
+        {task.category && (
+          <p>
+            <strong>Category:</strong> {task.category}
+          </p>
+        )}
+
+        <p>
+          <strong>Priority:</strong>{" "}
+          {task.priority.charAt(0).toUpperCase() +
+            task.priority.slice(1)}
+        </p>
+
+        <p>
+          <strong>Due Date:</strong> {formatDate(task.dueDate)}
+        </p>
+
+        <p>
+          <strong>Created Date:</strong> {formatDate(task.createdDate)}
+        </p>
+
+        <p>
+          <strong>Completed Date:</strong>{" "}
+          {formatDate(task.completedDate)}
+        </p>
+
+        {task.attachment && (
+          <p>
+            <strong>Attachment:</strong> {task.attachment}
+          </p>
+        )}
+
+        <p>
+          <strong>Status:</strong>{" "}
+          {task.status === "completed"
+            ? "Completed"
+            : isMissed(task)
+            ? "Missed"
+            : "To Do"}
+        </p>
+
+        <div className="task-actions">
+          {showCompleteButton && (
+            <button onClick={() => handleComplete(task)}>
+              Complete
+            </button>
+          )}
+
+          <button onClick={() => handleDelete(task._id)}>
+            Delete
+          </button>
+        </div>
       </div>
+    );
+  };
+
+  if (!token || !user) {
+    if (showSignup) {
+      return (
+        <>
+          <Signup onSignup={handleSignup} />
+
+          <div className="auth-switch">
+            <button onClick={() => setShowSignup(false)}>
+              Already have an account? Login
+            </button>
+          </div>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <Login onLogin={handleLogin} />
+
+        <div className="auth-switch">
+          <button onClick={() => setShowSignup(true)}>
+            Don't have an account? Sign Up
+          </button>
+        </div>
+      </>
     );
   }
 
   return (
-    <div className="app">
-      <header>
+    <div className="app-container">
+      <header className="app-header">
         <div>
-          <h1>My Checklist</h1>
-
-          <p>
-            Welcome, {user.name}! Plan your tasks, track deadlines,
-            and stay organized.
-          </p>
+          <h1>MERN Checklist</h1>
+          <p>Welcome, {user.name}!</p>
         </div>
 
         <button onClick={handleLogout}>Logout</button>
       </header>
 
-      <form className="task-form" onSubmit={addTask}>
+      <section className="add-task-section">
         <h2>Add New Task</h2>
 
-        <input
-          type="text"
-          placeholder="Task name"
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          required
-        />
+        <form onSubmit={handleAddTask}>
+          <input
+            type="text"
+            placeholder="Task name"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            required
+          />
 
-        <textarea
-          placeholder="Description (optional)"
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-        />
+          <textarea
+            placeholder="Description (optional)"
+            value={description}
+            onChange={(event) =>
+              setDescription(event.target.value)
+            }
+          />
 
-        <input
-          type="text"
-          placeholder="Category"
-          value={category}
-          onChange={(event) => setCategory(event.target.value)}
-        />
+          <input
+            type="text"
+            placeholder="Category"
+            value={category}
+            onChange={(event) => setCategory(event.target.value)}
+          />
 
-        <select
-          value={priority}
-          onChange={(event) => setPriority(event.target.value)}
-        >
-          <option value="low">Low Priority</option>
-          <option value="medium">Medium Priority</option>
-          <option value="high">High Priority</option>
-        </select>
+          <select
+            value={priority}
+            onChange={(event) => setPriority(event.target.value)}
+          >
+            <option value="low">Low Priority</option>
+            <option value="medium">Medium Priority</option>
+            <option value="high">High Priority</option>
+          </select>
 
-        <label>Completion Date</label>
+          <label>Completion / Due Date</label>
 
-        <input
-          type="date"
-          value={dueDate}
-          onChange={(event) => setDueDate(event.target.value)}
-          required
-        />
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(event) => setDueDate(event.target.value)}
+            required
+          />
 
-        <input
-          type="text"
-          placeholder="Attachment name/link (optional)"
-          value={attachment}
-          onChange={(event) => setAttachment(event.target.value)}
-        />
+          <input
+            type="text"
+            placeholder="Attachment (optional)"
+            value={attachment}
+            onChange={(event) =>
+              setAttachment(event.target.value)
+            }
+          />
 
-        <button type="submit">Add Task</button>
-      </form>
+          <button type="submit">Add Task</button>
+        </form>
 
-      {loading ? (
-        <p className="loading">Loading tasks...</p>
-      ) : (
-        <main className="columns">
-          <section className="column todo">
-            <h2>TO DO</h2>
+        {message && <p>{message}</p>}
+      </section>
 
-            {todoTasks.length === 0 ? (
-              <p>No tasks to do.</p>
-            ) : (
-              todoTasks.map((task) => (
-                <TaskCard
-                  key={task._id}
-                  task={task}
-                  showComplete={true}
-                />
-              ))
-            )}
-          </section>
+      <main className="checklist-container">
+        <section className="checklist-column">
+          <h2>TO DO</h2>
 
-          <section className="column missed">
-            <h2>MISSED</h2>
+          {todoTasks.length === 0 ? (
+            <p>No tasks to do.</p>
+          ) : (
+            todoTasks.map((task) => renderTask(task, true))
+          )}
+        </section>
 
-            {missedTasks.length === 0 ? (
-              <p>No missed tasks.</p>
-            ) : (
-              missedTasks.map((task) => (
-                <TaskCard
-                  key={task._id}
-                  task={task}
-                  showComplete={true}
-                />
-              ))
-            )}
-          </section>
+        <section className="checklist-column">
+          <h2>MISSED</h2>
 
-          <section className="column completed">
-            <h2>COMPLETED</h2>
+          {missedTasks.length === 0 ? (
+            <p>No missed tasks.</p>
+          ) : (
+            missedTasks.map((task) => renderTask(task, true))
+          )}
+        </section>
 
-            {completedTasks.length === 0 ? (
-              <p>No completed tasks.</p>
-            ) : (
-              completedTasks.map((task) => (
-                <TaskCard
-                  key={task._id}
-                  task={task}
-                  showComplete={false}
-                />
-              ))
-            )}
-          </section>
-        </main>
-      )}
+        <section className="checklist-column">
+          <h2>COMPLETED</h2>
+
+          {completedTasks.length === 0 ? (
+            <p>No completed tasks.</p>
+          ) : (
+            completedTasks.map((task) => renderTask(task, false))
+          )}
+        </section>
+      </main>
     </div>
   );
 }
